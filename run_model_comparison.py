@@ -1,10 +1,12 @@
 """
 MODEL COMPARISON SCRIPT
 =======================
-Script untuk membandingkan performa 3 model forecasting:
-- ARIMA (Statistical model)
-- LSTM (Deep Learning model)
-- Ensemble (Kombinasi ARIMA + LSTM)
+Script untuk membandingkan performa 5 model forecasting:
+- ARIMA (Statistical)
+- LSTM (Deep Learning - Complex)
+- GRU (Deep Learning - Efficient)
+- SVR (Machine Learning - Distance based)
+- XGBoost (Machine Learning - Tree based)
 
 Akan test pada 10 saham teratas berdasarkan Market Cap dari sektor yang dipilih.
 """
@@ -20,6 +22,8 @@ if 'src.model_comparison' in sys.modules:
     importlib.reload(sys.modules['src.model_comparison'])
 if 'src.model_validation' in sys.modules:
     importlib.reload(sys.modules['src.model_validation'])
+if 'src.visualization' in sys.modules:
+    importlib.reload(sys.modules['src.visualization'])
 
 from src.data_loader import load_stock
 from src.preprocessing import add_indicators
@@ -29,8 +33,8 @@ from src.visualization import plot_model_comparison, plot_model_performance_summ
 print("""
 ╔════════════════════════════════════════════════════════════════╗
 ║                   MODEL COMPARISON TOOL                        ║
-║   Testing: ARIMA vs LSTM vs Simple vs Stacked vs Weighted     ║
-║                     Ensemble Methods                           ║
+║        Testing: ARIMA vs LSTM vs GRU vs SVR vs XGBoost         ║
+║                   (5 Single Models Race)                       ║
 ╚════════════════════════════════════════════════════════════════╝
 """)
 
@@ -96,14 +100,11 @@ if len(stock_data) == 0:
 print(f"\n✅ Successfully loaded {len(stock_data)} stocks")
 
 # ============================================================================
-# RUN MODEL COMPARISON (with Advanced Ensemble)
+# RUN MODEL COMPARISON
 # ============================================================================
 
-print("\n💡 Advanced Ensemble Methods will be trained automatically")
-print("   - Stacked Ensemble: XGBoost meta-learner")
-print("   - Weighted Ensemble: Optimized weights\n")
-
-df_comparison = compare_models_bulk(stock_data, use_advanced_ensemble=True)
+# Note: Parameter use_advanced_ensemble sudah dihapus dari fungsi
+df_comparison = compare_models_bulk(stock_data)
 
 # ============================================================================
 # VALIDATE AGAINST ACTUAL DATA
@@ -156,7 +157,7 @@ try:
     # Determine winner
     if metrics_summary:
         best_model, best_metrics = determine_best_model(metrics_summary)
-        print(f"\n🏆 WINNER: {best_model} with MAPE {best_metrics['MAPE']:.2f}%")
+        print(f"\n🏆 WINNER: {best_model.upper()} with MAPE {best_metrics['MAPE']:.2f}%")
     
 except FileNotFoundError:
     print("⚠️  Actual data file not found. Skipping validation.")
@@ -165,6 +166,9 @@ except FileNotFoundError:
     directional_accuracy = None
 except Exception as e:
     print(f"❌ Error during validation: {e}")
+    # Print traceback for easier debugging
+    import traceback
+    traceback.print_exc()
     df_validation = None
     metrics_summary = None
     directional_accuracy = None
@@ -229,12 +233,17 @@ if df_validation is not None and metrics_summary is not None:
 
 # 3. Generate visualizations
 print("\n📊 Generating visualizations...")
-plot_model_comparison(df_comparison, save_dir='output/models')
-plot_model_performance_summary(analysis, save_dir='output/models')
+try:
+    plot_model_comparison(df_comparison, save_dir='output/models')
+    plot_model_performance_summary(analysis, save_dir='output/models')
 
-# Generate validation visualization if available
-if df_validation is not None and metrics_summary is not None:
-    plot_validation_results(df_validation, metrics_summary, save_dir='output/models')
+    # Generate validation visualization if available
+    if df_validation is not None and metrics_summary is not None:
+        plot_validation_results(df_validation, metrics_summary, save_dir='output/models')
+except Exception as e:
+    print(f"❌ Error generating visualizations: {e}")
+    import traceback
+    traceback.print_exc()
 
 # ============================================================================
 # FINAL SUMMARY
@@ -258,38 +267,30 @@ if df_validation is not None:
 
 # Recommendation
 print("\n" + "="*80)
-print("💡 RECOMMENDATION")
+print("💡 RECOMMENDATION & INSIGHTS")
 print("="*80)
 
 if analysis['speed_ranking']:
     fastest = analysis['speed_ranking'][0][0]
-    slowest = analysis['speed_ranking'][-1][0]
     
     print(f"\n⚡ For SPEED:      Use {fastest}")
-    print(f"🎯 For ACCURACY:   Use Ensemble (balanced approach)")
-    print(f"🤖 For COMPLEXITY: Use LSTM (captures non-linear patterns)")
+    print(f"🎯 For ACCURACY:   Check 'Best Model' from validation results")
     
-    # Smart recommendation based on data
-    avg_arima = analysis['prediction_stats'].get('arima', {}).get('mean', 0)
-    avg_lstm = analysis['prediction_stats'].get('lstm', {}).get('mean', 0)
-    avg_ensemble = analysis['prediction_stats'].get('ensemble', {}).get('mean', 0)
-    
-    print(f"\n📊 Average Predictions:")
-    print(f"   ARIMA:    {avg_arima:+.2f}%")
-    print(f"   LSTM:     {avg_lstm:+.2f}%")
-    print(f"   Ensemble: {avg_ensemble:+.2f}%")
-    
-    # Calculate prediction spread
-    predictions = [avg_arima, avg_lstm, avg_ensemble]
-    spread = max(predictions) - min(predictions)
-    
-    if spread > 5:
-        print(f"\n⚠️  HIGH DISAGREEMENT between models (spread: {spread:.2f}%)")
-        print(f"   → Models have different views on market direction")
-        print(f"   → Ensemble provides balanced perspective")
-    else:
-        print(f"\n✅ Models AGREE (spread: {spread:.2f}%)")
-        print(f"   → High confidence in prediction direction")
+    # Calculate prediction spread (Disagreement level)
+    means = [stats['mean'] for stats in analysis['prediction_stats'].values()]
+    if means:
+        spread = max(means) - min(means)
+        avg_prediction = sum(means) / len(means)
+        
+        print(f"\n📊 Market Consensus:")
+        print(f"   Average Predicted Change: {avg_prediction:+.2f}%")
+        
+        if spread > 5:
+            print(f"   ⚠️  HIGH DISAGREEMENT (Spread: {spread:.2f}%)")
+            print(f"      → Models have conflicting views. High Uncertainty.")
+        else:
+            print(f"   ✅ STRONG CONSENSUS (Spread: {spread:.2f}%)")
+            print(f"      → Models agree on the market direction.")
 
 # Final validation summary
 if metrics_summary:
@@ -298,13 +299,13 @@ if metrics_summary:
     print("="*80)
     
     best_model_name, best_model_metrics = determine_best_model(metrics_summary)
-    print(f"\n🏆 Most Accurate Model: {best_model_name}")
+    print(f"\n🏆 Most Accurate Model: {best_model_name.upper()}")
     print(f"   MAPE: {best_model_metrics['MAPE']:.2f}%")
     print(f"   MAE:  Rp {best_model_metrics['MAE']:,.2f}")
     
     if directional_accuracy:
         best_dir_model = max(directional_accuracy.items(), key=lambda x: x[1]['accuracy_pct'])
-        print(f"\n🎯 Best Direction Prediction: {best_dir_model[0]}")
+        print(f"\n🎯 Best Direction Prediction: {best_dir_model[0].upper()}")
         print(f"   Accuracy: {best_dir_model[1]['accuracy_pct']:.2f}%")
 
 print("\n" + "="*80)

@@ -1,1 +1,2 @@
-# Model modules: ARIMA, LSTM, Ensemble
+# Model modules collection
+# Includes: ARIMA, LSTM, GRU, SVR, XGBoost

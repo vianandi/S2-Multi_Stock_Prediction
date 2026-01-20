@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 
+# Daftar model yang akan divalidasi
+MODELS = ['arima', 'lstm', 'gru', 'svr', 'xgb']
+
 def load_actual_data(file_path='dataset/pembanding/datasahampembanding.csv'):
     """
     Load actual prices dari data IDX
@@ -8,16 +11,20 @@ def load_actual_data(file_path='dataset/pembanding/datasahampembanding.csv'):
     Returns:
         dict {stock_code: actual_price}
     """
-    df = pd.read_csv(file_path)
-    
-    # Create dictionary: stock_code -> actual_price
-    actual_dict = {}
-    for _, row in df.iterrows():
-        code = row['Kode Saham'].strip()
-        actual_price = row['Penutupan']
-        actual_dict[code] = actual_price
-    
-    return actual_dict
+    try:
+        df = pd.read_csv(file_path)
+        
+        # Create dictionary: stock_code -> actual_price
+        actual_dict = {}
+        for _, row in df.iterrows():
+            code = row['Kode Saham'].strip()
+            actual_price = row['Penutupan']
+            actual_dict[code] = actual_price
+        
+        return actual_dict
+    except Exception as e:
+        print(f"Error loading actual data: {e}")
+        return {}
 
 def calculate_error_metrics(predicted, actual):
     """
@@ -46,9 +53,7 @@ def validate_predictions(df_comparison, actual_data):
     Parameters:
     -----------
     df_comparison : DataFrame
-        Results from model comparison with columns:
-        stock, arima_forecast, lstm_forecast, ensemble_forecast, 
-        stacked_forecast, weighted_forecast
+        Results from model comparison
     actual_data : dict
         Dictionary {stock_code: actual_price}
     
@@ -76,7 +81,7 @@ def validate_predictions(df_comparison, actual_data):
         }
         
         # Validate all available models
-        for model in ['arima', 'lstm', 'ensemble', 'stacked', 'weighted']:
+        for model in MODELS:
             forecast_col = f'{model}_forecast'
             if forecast_col in df_comparison.columns and pd.notna(row[forecast_col]):
                 pred = row[forecast_col]
@@ -97,7 +102,7 @@ def calculate_aggregate_metrics(df_validation):
     """
     metrics_summary = {}
     
-    for model in ['arima', 'lstm', 'ensemble', 'stacked', 'weighted']:
+    for model in MODELS:
         error_col = f'{model}_abs_error'
         pct_error_col = f'{model}_error'
         pred_col = f'{model}_pred'
@@ -144,7 +149,7 @@ def calculate_directional_accuracy(df_validation):
     """
     accuracy = {}
     
-    for model in ['arima', 'lstm', 'ensemble', 'stacked', 'weighted']:
+    for model in MODELS:
         direction_col = f'{model}_direction'
         
         if direction_col in df_validation.columns:
@@ -166,7 +171,7 @@ def generate_validation_report(df_validation, metrics_summary, directional_accur
     """
     Generate comprehensive validation report
     """
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         f.write("="*80 + "\n")
         f.write("MODEL VALIDATION REPORT\n")
         f.write("Prediction vs Actual (IDX Data - 9 January 2023)\n")
@@ -184,7 +189,7 @@ def generate_validation_report(df_validation, metrics_summary, directional_accur
             best_model, best_metrics = determine_best_model(metrics_summary)
             f.write("🏆 BEST PERFORMING MODEL\n")
             f.write("-"*80 + "\n")
-            f.write(f"  Winner: {best_model}\n")
+            f.write(f"  Winner: {best_model.upper()}\n")
             f.write(f"  MAPE:   {best_metrics['MAPE']:.2f}%\n")
             f.write(f"  MAE:    Rp {best_metrics['MAE']:,.2f}\n")
             f.write(f"  RMSE:   Rp {best_metrics['RMSE']:,.2f}\n\n")
@@ -210,30 +215,32 @@ def generate_validation_report(df_validation, metrics_summary, directional_accur
         f.write("\n")
         
         # Detailed per-stock validation
-        f.write("DETAILED VALIDATION TABLE\n")
-        f.write("-"*80 + "\n")
+        f.write("DETAILED VALIDATION TABLE (Top 5 Models)\n")
+        f.write("-"*120 + "\n") # Widen line for more columns
         
-        # Table header
-        header = f"{'Stock':<6} {'Current':<8} {'Actual':<8} {'ARIMA':<8} {'LSTM':<8} {'Ensemble':<8} {'Best':<8}\n"
+        # Table header - Adjusted for 5 models
+        header = f"{'Stock':<6} {'Current':<8} {'Actual':<8} {'ARIMA':<8} {'LSTM':<8} {'GRU':<8} {'SVR':<8} {'XGB':<8} {'Best':<8}\n"
         f.write(header)
-        f.write("-"*80 + "\n")
+        f.write("-"*120 + "\n")
         
         # Table rows
         for _, row in df_validation.iterrows():
             # Determine best model for this stock
-            errors = {
-                'ARIMA': abs(row.get('arima_error', 999)),
-                'LSTM': abs(row.get('lstm_error', 999)),
-                'Ensemble': abs(row.get('ensemble_error', 999))
-            }
-            best_for_stock = min(errors.items(), key=lambda x: x[1])[0]
+            errors = {}
+            for m in MODELS:
+                 if f'{m}_error' in row:
+                     errors[m.upper()] = abs(row[f'{m}_error'])
+            
+            best_for_stock = min(errors.items(), key=lambda x: x[1])[0] if errors else 'N/A'
             
             line = f"{row['stock']:<6} "
             line += f"{row['current']:<8.0f} "
             line += f"{row['actual']:<8.0f} "
             line += f"{row.get('arima_pred', 0):<8.0f} "
             line += f"{row.get('lstm_pred', 0):<8.0f} "
-            line += f"{row.get('ensemble_pred', 0):<8.0f} "
+            line += f"{row.get('gru_pred', 0):<8.0f} "
+            line += f"{row.get('svr_pred', 0):<8.0f} "
+            line += f"{row.get('xgb_pred', 0):<8.0f} "
             line += f"{best_for_stock:<8}\n"
             f.write(line)
         

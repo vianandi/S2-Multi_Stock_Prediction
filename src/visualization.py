@@ -1,11 +1,27 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import pandas as pd
 import os
+from scipy.stats import pearsonr
 
 # Set style
 sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (14, 8)
+
+# Standard colors for models
+COLORS = {
+    'arima': '#FF6B6B',   # Red
+    'lstm': '#4ECDC4',    # Teal
+    'gru': '#FFE66D',     # Yellow
+    'svr': '#1A535C',     # Dark Blue
+    'xgb': '#FF9F1C',     # Orange
+    'ensemble': '#45B7D1',# Legacy Blue
+    'actual': '#2D3436'   # Dark Gray
+}
+
+def get_color(model_name):
+    return COLORS.get(model_name.lower(), '#95A5A6') # Return gray if unknown
 
 def plot_stock(df, forecast, stock_code):
     """
@@ -25,13 +41,11 @@ def plot_stock(df, forecast, stock_code):
     plt.legend()
     plt.grid(True)
     
-    # ✅ TAMBAHAN: Auto-save plot
+    # Auto-save plot
     os.makedirs('output/plots', exist_ok=True)
     save_path = f'output/plots/{stock_code}_forecast.png'
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"✅ Plot saved: {save_path}")
-    
-    # Show plot (untuk interactive mode)
     plt.close()
 
 def plot_technical_indicators(df, stock_code):
@@ -220,130 +234,100 @@ def plot_correlation_matrix(stock_data_dict):
     print(f"✅ Correlation matrix plot saved: {save_path}")
     plt.close()
 
-import pandas as pd
-
 def plot_model_comparison(df_comparison, save_dir='output/plots'):
     """
-    Visualisasi perbandingan 3 model (ARIMA, LSTM, Ensemble)
+    Visualisasi perbandingan Model yang ada di df_comparison
     """
     import os
     os.makedirs(save_dir, exist_ok=True)
     
-    # Filter only valid data
-    df_valid = df_comparison.dropna(subset=['arima_forecast', 'lstm_forecast', 'ensemble_forecast'])
+    # Detect available models from columns
+    available_models = []
+    for col in df_comparison.columns:
+        if col.endswith('_forecast'):
+            model_name = col.replace('_forecast', '')
+            available_models.append(model_name)
+    
+    if not available_models:
+        print("⚠️ No model forecast data found")
+        return
+
+    # Filter columns to check validity (at least one forecast must be present)
+    check_cols = [f'{m}_forecast' for m in available_models]
+    df_valid = df_comparison.dropna(subset=check_cols, how='all')
     
     if len(df_valid) == 0:
         print("⚠️ No valid data for comparison visualization")
         return
     
     fig = plt.figure(figsize=(18, 12))
-    gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.3)
+    gs = fig.add_gridspec(2, 2, hspace=0.4, wspace=0.3)
     
-    # 1. Forecast Comparison - Bar Chart
+    # 1. Percentage Change Comparison
     ax1 = fig.add_subplot(gs[0, :])
     x = np.arange(len(df_valid))
-    width = 0.25
+    width = 0.8 / len(available_models)
     
-    ax1.bar(x - width, df_valid['arima_forecast'], width, label='ARIMA', alpha=0.8, color='#FF6B6B')
-    ax1.bar(x, df_valid['lstm_forecast'], width, label='LSTM', alpha=0.8, color='#4ECDC4')
-    ax1.bar(x + width, df_valid['ensemble_forecast'], width, label='Ensemble', alpha=0.8, color='#45B7D1')
-    ax1.plot(x, df_valid['current_price'], 'ko-', linewidth=2, markersize=8, label='Current Price')
+    for i, model in enumerate(available_models):
+        offset = width * i - (width * len(available_models) / 2) + (width/2)
+        col_name = f'{model}_change_pct'
+        if col_name in df_valid.columns:
+            ax1.bar(x + offset, df_valid[col_name], width, 
+                   label=model.upper(), alpha=0.8, color=get_color(model))
     
+    ax1.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
     ax1.set_xlabel('Stock')
-    ax1.set_ylabel('Price (IDR)')
-    ax1.set_title('Forecast Comparison: ARIMA vs LSTM vs Ensemble', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('Predicted Change (%)')
+    ax1.set_title('Predicted Price Change (%) by Model', fontsize=14, fontweight='bold')
     ax1.set_xticks(x)
     ax1.set_xticklabels(df_valid['stock'], rotation=45, ha='right')
     ax1.legend(loc='best')
     ax1.grid(True, alpha=0.3, axis='y')
     
-    # 2. Percentage Change Comparison
+    # 2. Execution Time Comparison
     ax2 = fig.add_subplot(gs[1, 0])
-    x = np.arange(len(df_valid))
-    width = 0.25
+    avg_times = {}
+    for model in available_models:
+        col_name = f'{model}_time'
+        if col_name in df_valid.columns:
+            avg_times[model.upper()] = df_valid[col_name].mean()
+            
+    if avg_times:
+        colors = [get_color(m) for m in avg_times.keys()]
+        bars = ax2.bar(avg_times.keys(), avg_times.values(), color=colors, alpha=0.8)
+        ax2.set_ylabel('Time (seconds)')
+        ax2.set_title('Average Execution Time', fontsize=12, fontweight='bold')
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        for bar in bars:
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.2f}s', ha='center', va='bottom', fontweight='bold')
     
-    ax2.bar(x - width, df_valid['arima_change_pct'], width, label='ARIMA', alpha=0.8, color='#FF6B6B')
-    ax2.bar(x, df_valid['lstm_change_pct'], width, label='LSTM', alpha=0.8, color='#4ECDC4')
-    ax2.bar(x + width, df_valid['ensemble_change_pct'], width, label='Ensemble', alpha=0.8, color='#45B7D1')
-    ax2.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-    
-    ax2.set_xlabel('Stock')
-    ax2.set_ylabel('Change (%)')
-    ax2.set_title('Predicted Price Change (%)', fontsize=12, fontweight='bold')
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(df_valid['stock'], rotation=45, ha='right')
-    ax2.legend(loc='best')
-    ax2.grid(True, alpha=0.3, axis='y')
-    
-    # 3. Execution Time Comparison
+    # 3. Prediction Distribution (Boxplot)
     ax3 = fig.add_subplot(gs[1, 1])
+    data_to_plot = []
+    labels = []
+    colors_box = []
     
-    avg_times = {
-        'ARIMA': df_comparison['arima_time'].mean(),
-        'LSTM': df_comparison['lstm_time'].mean(),
-        'Ensemble': df_comparison['ensemble_time'].mean()
-    }
+    for model in available_models:
+        col_name = f'{model}_change_pct'
+        if col_name in df_valid.columns:
+            data_to_plot.append(df_valid[col_name].dropna())
+            labels.append(model.upper())
+            colors_box.append(get_color(model))
     
-    colors_time = ['#FF6B6B', '#4ECDC4', '#45B7D1']
-    bars = ax3.bar(avg_times.keys(), avg_times.values(), color=colors_time, alpha=0.8)
-    ax3.set_ylabel('Time (seconds)')
-    ax3.set_title('Average Execution Time', fontsize=12, fontweight='bold')
-    ax3.grid(True, alpha=0.3, axis='y')
-    
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        ax3.text(bar.get_x() + bar.get_width()/2., height,
-                f'{height:.2f}s',
-                ha='center', va='bottom', fontweight='bold')
-    
-    # 4. Model Agreement - Scatter Plot
-    ax4 = fig.add_subplot(gs[2, 0])
-    ax4.scatter(df_valid['arima_change_pct'], df_valid['lstm_change_pct'], 
-               s=100, alpha=0.6, c='purple', edgecolors='black')
-    
-    # Add diagonal line (perfect agreement)
-    lims = [
-        np.min([ax4.get_xlim(), ax4.get_ylim()]),
-        np.max([ax4.get_xlim(), ax4.get_ylim()]),
-    ]
-    ax4.plot(lims, lims, 'r--', alpha=0.5, linewidth=2, label='Perfect Agreement')
-    
-    ax4.set_xlabel('ARIMA Change (%)')
-    ax4.set_ylabel('LSTM Change (%)')
-    ax4.set_title('Model Agreement: ARIMA vs LSTM', fontsize=12, fontweight='bold')
-    ax4.grid(True, alpha=0.3)
-    ax4.legend()
-    
-    # Calculate and display correlation
-    corr = df_valid['arima_change_pct'].corr(df_valid['lstm_change_pct'])
-    ax4.text(0.05, 0.95, f'Correlation: {corr:.3f}',
-            transform=ax4.transAxes, fontsize=10,
-            verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
-    # 5. Prediction Distribution
-    ax5 = fig.add_subplot(gs[2, 1])
-    
-    data_to_plot = [
-        df_valid['arima_change_pct'].dropna(),
-        df_valid['lstm_change_pct'].dropna(),
-        df_valid['ensemble_change_pct'].dropna()
-    ]
-    labels = ['ARIMA', 'LSTM', 'Ensemble']
-    colors_box = ['#FF6B6B', '#4ECDC4', '#45B7D1']
-    
-    bp = ax5.boxplot(data_to_plot, labels=labels, patch_artist=True,
+    bp = ax3.boxplot(data_to_plot, labels=labels, patch_artist=True,
                      showmeans=True, meanline=True)
     
     for patch, color in zip(bp['boxes'], colors_box):
         patch.set_facecolor(color)
         patch.set_alpha(0.6)
     
-    ax5.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-    ax5.set_ylabel('Change (%)')
-    ax5.set_title('Prediction Distribution', fontsize=12, fontweight='bold')
-    ax5.grid(True, alpha=0.3, axis='y')
+    ax3.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+    ax3.set_ylabel('Change (%)')
+    ax3.set_title('Prediction Distribution', fontsize=12, fontweight='bold')
+    ax3.grid(True, alpha=0.3, axis='y')
     
     plt.suptitle('MODEL COMPARISON DASHBOARD', fontsize=16, fontweight='bold', y=0.995)
     
@@ -354,7 +338,7 @@ def plot_model_comparison(df_comparison, save_dir='output/plots'):
 
 def plot_model_performance_summary(analysis, save_dir='output/plots'):
     """
-    Summary visualization dari analysis results
+    Summary visualization dari analysis results (Auto-adaptive to available models)
     """
     import os
     os.makedirs(save_dir, exist_ok=True)
@@ -368,8 +352,9 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
     total = analysis['total_stocks']
     success_rates = [count/total*100 for count in success_counts]
     
-    colors_success = ['#FF6B6B', '#4ECDC4', '#45B7D1']
-    bars1 = ax1.bar(models, success_rates, color=colors_success, alpha=0.7)
+    colors_success = [get_color(m) for m in models]
+    
+    bars1 = ax1.bar([m.upper() for m in models], success_rates, color=colors_success, alpha=0.7)
     ax1.set_ylabel('Success Rate (%)')
     ax1.set_title('Model Success Rate', fontweight='bold')
     ax1.set_ylim([0, 105])
@@ -378,8 +363,7 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
     for bar in bars1:
         height = bar.get_height()
         ax1.text(bar.get_x() + bar.get_width()/2., height,
-                f'{height:.1f}%',
-                ha='center', va='bottom', fontweight='bold')
+                f'{height:.1f}%', ha='center', va='bottom', fontweight='bold')
     
     # 2. Speed Comparison
     ax2 = axes[0, 1]
@@ -387,14 +371,7 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
         speed_models = [item[0] for item in analysis['speed_ranking']]
         speed_times = [item[1] for item in analysis['speed_ranking']]
         
-        colors_speed = []
-        for model in speed_models:
-            if 'ARIMA' in model.upper():
-                colors_speed.append('#FF6B6B')
-            elif 'LSTM' in model.upper():
-                colors_speed.append('#4ECDC4')
-            else:
-                colors_speed.append('#45B7D1')
+        colors_speed = [get_color(m) for m in speed_models]
         
         bars2 = ax2.barh(speed_models, speed_times, color=colors_speed, alpha=0.7)
         ax2.set_xlabel('Time (seconds)')
@@ -404,8 +381,7 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
         for bar in bars2:
             width = bar.get_width()
             ax2.text(width, bar.get_y() + bar.get_height()/2.,
-                    f'{width:.2f}s',
-                    ha='left', va='center', fontweight='bold')
+                    f'{width:.2f}s', ha='left', va='center', fontweight='bold')
     
     # 3. Average Prediction
     ax3 = axes[1, 0]
@@ -413,10 +389,9 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
         pred_models = list(analysis['prediction_stats'].keys())
         pred_means = [analysis['prediction_stats'][m]['mean'] for m in pred_models]
         
-        colors_pred = ['#FF6B6B' if 'arima' in m else '#4ECDC4' if 'lstm' in m else '#45B7D1' 
-                      for m in pred_models]
+        colors_pred = [get_color(m) for m in pred_models]
         
-        bars3 = ax3.bar(pred_models, pred_means, color=colors_pred, alpha=0.7)
+        bars3 = ax3.bar([m.upper() for m in pred_models], pred_means, color=colors_pred, alpha=0.7)
         ax3.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
         ax3.set_ylabel('Average Change (%)')
         ax3.set_title('Average Predicted Change', fontweight='bold')
@@ -425,8 +400,7 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
         for bar in bars3:
             height = bar.get_height()
             ax3.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{height:+.2f}%',
-                    ha='center', va='bottom' if height > 0 else 'top', 
+                    f'{height:+.2f}%', ha='center', va='bottom' if height > 0 else 'top', 
                     fontweight='bold')
     
     # 4. Bullish vs Bearish Signals
@@ -444,7 +418,7 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
         ax4.set_ylabel('Count')
         ax4.set_title('Signal Distribution', fontweight='bold')
         ax4.set_xticks(x)
-        ax4.set_xticklabels(models_signal)
+        ax4.set_xticklabels([m.upper() for m in models_signal])
         ax4.legend()
         ax4.grid(True, alpha=0.3, axis='y')
     
@@ -459,171 +433,116 @@ def plot_model_performance_summary(analysis, save_dir='output/plots'):
 
 def plot_validation_results(df_validation, metrics_summary, save_dir='output/models'):
     """
-    Visualize prediction vs actual results with error analysis
-    
-    Parameters:
-    -----------
-    df_validation : DataFrame
-        Contains columns: stock, actual, arima_pred, lstm_pred, ensemble_pred, *_error, etc.
-    metrics_summary : dict
-        Contains MAE, RMSE, MAPE for each model
-    save_dir : str
-        Directory to save the plot
+    Visualize prediction vs actual results for ALL models
+    Dynamically creates subplots based on available models.
     """
     os.makedirs(save_dir, exist_ok=True)
     
-    fig = plt.figure(figsize=(18, 12))
-    gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
-    
-    # Color scheme for models
-    colors = {
-        'arima': '#FF6B6B',
-        'lstm': '#4ECDC4',
-        'ensemble': '#45B7D1',
-        'actual': '#2D3436'
-    }
-    
-    # 1. Predicted vs Actual - ARIMA
-    ax1 = fig.add_subplot(gs[0, 0])
-    ax1.scatter(df_validation['actual'], df_validation['arima_pred'], 
-               alpha=0.6, s=100, color=colors['arima'], edgecolor='black', linewidth=0.5)
-    
-    # Perfect prediction line
-    min_val = min(df_validation['actual'].min(), df_validation['arima_pred'].min())
-    max_val = max(df_validation['actual'].max(), df_validation['arima_pred'].max())
-    ax1.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2, label='Perfect Prediction')
-    
-    ax1.set_xlabel('Actual Price (IDR)', fontweight='bold')
-    ax1.set_ylabel('Predicted Price (IDR)', fontweight='bold')
-    ax1.set_title('ARIMA: Predicted vs Actual', fontweight='bold', fontsize=12)
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    
-    # Add R² score
-    from scipy.stats import pearsonr
-    r, _ = pearsonr(df_validation['actual'], df_validation['arima_pred'])
-    r_squared = r**2
-    ax1.text(0.05, 0.95, f'R² = {r_squared:.3f}\nMAPE = {metrics_summary["arima"]["MAPE"]:.2f}%',
-            transform=ax1.transAxes, fontsize=10, verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # 2. Predicted vs Actual - LSTM
-    ax2 = fig.add_subplot(gs[0, 1])
-    ax2.scatter(df_validation['actual'], df_validation['lstm_pred'], 
-               alpha=0.6, s=100, color=colors['lstm'], edgecolor='black', linewidth=0.5)
-    ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2, label='Perfect Prediction')
-    
-    ax2.set_xlabel('Actual Price (IDR)', fontweight='bold')
-    ax2.set_ylabel('Predicted Price (IDR)', fontweight='bold')
-    ax2.set_title('LSTM: Predicted vs Actual', fontweight='bold', fontsize=12)
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
-    r, _ = pearsonr(df_validation['actual'], df_validation['lstm_pred'])
-    r_squared = r**2
-    ax2.text(0.05, 0.95, f'R² = {r_squared:.3f}\nMAPE = {metrics_summary["lstm"]["MAPE"]:.2f}%',
-            transform=ax2.transAxes, fontsize=10, verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # 3. Predicted vs Actual - Ensemble
-    ax3 = fig.add_subplot(gs[0, 2])
-    ax3.scatter(df_validation['actual'], df_validation['ensemble_pred'], 
-               alpha=0.6, s=100, color=colors['ensemble'], edgecolor='black', linewidth=0.5)
-    ax3.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, linewidth=2, label='Perfect Prediction')
-    
-    ax3.set_xlabel('Actual Price (IDR)', fontweight='bold')
-    ax3.set_ylabel('Predicted Price (IDR)', fontweight='bold')
-    ax3.set_title('Ensemble: Predicted vs Actual', fontweight='bold', fontsize=12)
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
-    
-    r, _ = pearsonr(df_validation['actual'], df_validation['ensemble_pred'])
-    r_squared = r**2
-    ax3.text(0.05, 0.95, f'R² = {r_squared:.3f}\nMAPE = {metrics_summary["ensemble"]["MAPE"]:.2f}%',
-            transform=ax3.transAxes, fontsize=10, verticalalignment='top',
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
-    # 4. Error Distribution - ARIMA
-    ax4 = fig.add_subplot(gs[1, 0])
-    ax4.hist(df_validation['arima_error'], bins=20, color=colors['arima'], alpha=0.7, edgecolor='black')
-    ax4.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero Error')
-    ax4.set_xlabel('Prediction Error (%)', fontweight='bold')
-    ax4.set_ylabel('Frequency', fontweight='bold')
-    ax4.set_title('ARIMA: Error Distribution', fontweight='bold', fontsize=12)
-    ax4.legend()
-    ax4.grid(True, alpha=0.3, axis='y')
-    
-    # 5. Error Distribution - LSTM
-    ax5 = fig.add_subplot(gs[1, 1])
-    ax5.hist(df_validation['lstm_error'], bins=20, color=colors['lstm'], alpha=0.7, edgecolor='black')
-    ax5.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero Error')
-    ax5.set_xlabel('Prediction Error (%)', fontweight='bold')
-    ax5.set_ylabel('Frequency', fontweight='bold')
-    ax5.set_title('LSTM: Error Distribution', fontweight='bold', fontsize=12)
-    ax5.legend()
-    ax5.grid(True, alpha=0.3, axis='y')
-    
-    # 6. Error Distribution - Ensemble
-    ax6 = fig.add_subplot(gs[1, 2])
-    ax6.hist(df_validation['ensemble_error'], bins=20, color=colors['ensemble'], alpha=0.7, edgecolor='black')
-    ax6.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Zero Error')
-    ax6.set_xlabel('Prediction Error (%)', fontweight='bold')
-    ax6.set_ylabel('Frequency', fontweight='bold')
-    ax6.set_title('Ensemble: Error Distribution', fontweight='bold', fontsize=12)
-    ax6.legend()
-    ax6.grid(True, alpha=0.3, axis='y')
-    
-    # 7. Per-Stock Error Comparison (Top 10 by actual price)
-    ax7 = fig.add_subplot(gs[2, :2])
-    df_sorted = df_validation.nlargest(10, 'actual')
-    
-    x = np.arange(len(df_sorted))
-    width = 0.25
-    
-    bars1 = ax7.bar(x - width, df_sorted['arima_abs_error'], width, 
-                    label='ARIMA', color=colors['arima'], alpha=0.8)
-    bars2 = ax7.bar(x, df_sorted['lstm_abs_error'], width, 
-                    label='LSTM', color=colors['lstm'], alpha=0.8)
-    bars3 = ax7.bar(x + width, df_sorted['ensemble_abs_error'], width, 
-                    label='Ensemble', color=colors['ensemble'], alpha=0.8)
-    
-    ax7.set_ylabel('Absolute Error (%)', fontweight='bold')
-    ax7.set_xlabel('Stock Code', fontweight='bold')
-    ax7.set_title('Per-Stock Absolute Error (Top 10 by Price)', fontweight='bold', fontsize=12)
-    ax7.set_xticks(x)
-    ax7.set_xticklabels(df_sorted['stock'], rotation=45, ha='right')
-    ax7.legend()
-    ax7.grid(True, alpha=0.3, axis='y')
-    
-    # 8. Model Performance Comparison (MAPE)
-    ax8 = fig.add_subplot(gs[2, 2])
     models = list(metrics_summary.keys())
+    n_models = len(models)
+    
+    # Dynamic Grid Layout
+    # We want Scatter plots and Histogram plots for each model + Summary
+    # Let's do a fixed layout that accommodates up to 6 models comfortably
+    # 3 Columns: 
+    # Row 1-2: Scatter Plots (Predicted vs Actual)
+    # Row 3-4: Error Histograms
+    # Row 5: Comparison Metrics
+    
+    fig = plt.figure(figsize=(18, 20))
+    gs = fig.add_gridspec(5, 3, hspace=0.4, wspace=0.3)
+    
+    # --- 1. SCATTER PLOTS (Predicted vs Actual) ---
+    for i, model in enumerate(models):
+        if i >= 6: break # Limit to 6 plots max for layout safety
+        
+        row = i // 3
+        col = i % 3
+        ax = fig.add_subplot(gs[row, col])
+        
+        pred_col = f'{model}_pred'
+        if pred_col in df_validation.columns:
+            # Plot data
+            ax.scatter(df_validation['actual'], df_validation[pred_col], 
+                       alpha=0.6, s=80, color=get_color(model), 
+                       edgecolor='black', linewidth=0.5)
+            
+            # Perfect line
+            min_val = min(df_validation['actual'].min(), df_validation[pred_col].min())
+            max_val = max(df_validation['actual'].max(), df_validation[pred_col].max())
+            ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect')
+            
+            # Metrics
+            mape = metrics_summary[model]['MAPE']
+            r, _ = pearsonr(df_validation['actual'], df_validation[pred_col])
+            r2 = r**2
+            
+            ax.set_title(f'{model.upper()} (R²={r2:.2f}, MAPE={mape:.1f}%)', fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            if col == 0: ax.set_ylabel('Predicted')
+            if row == 1: ax.set_xlabel('Actual')
+
+    # --- 2. ERROR HISTOGRAMS ---
+    for i, model in enumerate(models):
+        if i >= 6: break
+        
+        row = (i // 3) + 2 # Shift down 2 rows
+        col = i % 3
+        ax = fig.add_subplot(gs[row, col])
+        
+        err_col = f'{model}_error' # Note: In validation we saved 'error' as pct_error
+        if err_col in df_validation.columns:
+            ax.hist(df_validation[err_col], bins=15, color=get_color(model), 
+                   alpha=0.7, edgecolor='black')
+            ax.axvline(x=0, color='red', linestyle='--', linewidth=2)
+            ax.set_title(f'{model.upper()} Error Dist.', fontweight='bold')
+            ax.grid(True, alpha=0.3, axis='y')
+            if col == 0: ax.set_ylabel('Freq')
+            if row == 3: ax.set_xlabel('Error (%)')
+
+    # --- 3. SUMMARY METRICS (Bottom Row) ---
+    
+    # MAPE Comparison
+    ax_mape = fig.add_subplot(gs[4, 0])
     mape_values = [metrics_summary[m]['MAPE'] for m in models]
-    mae_values = [metrics_summary[m]['MAE'] for m in models]
+    colors_bar = [get_color(m) for m in models]
     
-    model_colors = [colors[m] for m in models]
+    bars = ax_mape.barh([m.upper() for m in models], mape_values, color=colors_bar, alpha=0.8)
+    ax_mape.set_xlabel('MAPE (%) - Lower is Better')
+    ax_mape.set_title('Model Accuracy Comparison', fontweight='bold')
     
-    bars = ax8.barh(models, mape_values, color=model_colors, alpha=0.8, edgecolor='black', linewidth=1.5)
-    ax8.set_xlabel('MAPE (%)', fontweight='bold')
-    ax8.set_title('Overall Model Accuracy (Lower is Better)', fontweight='bold', fontsize=12)
-    ax8.grid(True, alpha=0.3, axis='x')
-    
-    # Add values on bars
-    for i, (bar, mape, mae) in enumerate(zip(bars, mape_values, mae_values)):
-        width = bar.get_width()
-        ax8.text(width + 0.1, bar.get_y() + bar.get_height()/2.,
-                f'{mape:.2f}%\n(MAE: Rp{mae:,.0f})',
-                ha='left', va='center', fontsize=9, fontweight='bold')
-    
-    # Highlight best model
+    # Highlight best
     best_idx = mape_values.index(min(mape_values))
     bars[best_idx].set_linewidth(3)
     bars[best_idx].set_edgecolor('gold')
     
-    plt.suptitle('VALIDATION RESULTS: PREDICTED vs ACTUAL (IDX - 9 Jan 2023)', 
-                 fontsize=16, fontweight='bold', y=0.995)
+    # MAE Comparison
+    ax_mae = fig.add_subplot(gs[4, 1])
+    mae_values = [metrics_summary[m]['MAE'] for m in models]
+    ax_mae.barh([m.upper() for m in models], mae_values, color=colors_bar, alpha=0.8)
+    ax_mae.set_xlabel('MAE (IDR) - Lower is Better')
+    ax_mae.set_title('Mean Absolute Error', fontweight='bold')
+    
+    # Per-Stock Error Heatmap (Top 10 Stocks)
+    # Using a simple bar chart instead of heatmap for clarity in this layout
+    ax_stock = fig.add_subplot(gs[4, 2])
+    
+    # Find best model per stock
+    model_wins = {m: 0 for m in models}
+    for _, row in df_validation.iterrows():
+        errors = {m: abs(row.get(f'{m}_error', 999)) for m in models}
+        winner = min(errors, key=errors.get)
+        if winner in model_wins:
+            model_wins[winner] += 1
+            
+    ax_stock.pie(model_wins.values(), labels=[m.upper() for m in model_wins.keys()], 
+                 colors=[get_color(m) for m in model_wins.keys()], autopct='%1.1f%%')
+    ax_stock.set_title('Best Model by Stock Count', fontweight='bold')
+
+    plt.suptitle('VALIDATION RESULTS: PREDICTED vs ACTUAL', 
+                 fontsize=20, fontweight='bold', y=0.99)
     
     save_path = f'{save_dir}/validation_results.png'
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    print(f"  📊 Validation Chart: {save_path}")
+    print(f"✅ Validation Chart: {save_path}")
     plt.close()

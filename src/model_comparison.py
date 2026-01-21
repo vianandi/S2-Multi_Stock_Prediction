@@ -6,7 +6,8 @@ from datetime import datetime
 # Import model-model single
 from src.model.arima_model import arima_forecast
 from src.model.lstm_model import lstm_forecast
-from src.model.gru_model import gru_forecast       # Model Baru
+# from src.model.gru_model import gru_forecast       # Original GRU
+from src.model.gru_model_optimized import gru_forecast_quick_optimized as gru_forecast  # ✨ OPTIMIZED GRU
 from src.model.svr_model import svr_forecast       # Model Baru
 from src.model.xgboost_model import xgboost_forecast # Model Baru
 
@@ -37,7 +38,11 @@ def compare_single_stock(prices, stock_code):
         start = time.time()
         try:
             # Jalankan forecasting
-            pred = func(prices)
+            # ✨ Special handling for optimized GRU
+            if name == 'gru':
+                pred = func(prices, look_back=30, epochs=50)  # Optimized parameters
+            else:
+                pred = func(prices)
             exec_time = time.time() - start
             
             # Simpan hasil

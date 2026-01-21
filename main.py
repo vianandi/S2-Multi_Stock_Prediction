@@ -5,10 +5,11 @@ from src.profit_simulation import simulate
 from src.visualization import (plot_stock, plot_technical_indicators, 
                                 plot_risk_metrics, plot_portfolio_allocation,
                                 plot_correlation_matrix)
-# ✅ UPDATE: Import 5 Model Single
+# ✅ UPDATE: Import 5 Model Single (with Optimized GRU)
 from src.model.arima_model import arima_forecast
 from src.model.lstm_model import lstm_forecast
-from src.model.gru_model import gru_forecast
+# from src.model.gru_model import gru_forecast  # Original GRU
+from src.model.gru_model_optimized import gru_forecast_quick_optimized as gru_forecast  # ✨ OPTIMIZED GRU
 from src.model.svr_model import svr_forecast
 from src.model.xgboost_model import xgboost_forecast
 
@@ -80,11 +81,11 @@ for i, code in enumerate(stock_list, 1):
         # Store data for portfolio optimization
         stock_data_for_portfolio[code] = prices
         
-        # ✅ RUN 5 MODELS
+        # ✅ RUN 5 MODELS (with Optimized GRU)
         try:
             pred_arima = arima_forecast(prices)
             pred_lstm = lstm_forecast(prices)
-            pred_gru = gru_forecast(prices)
+            pred_gru = gru_forecast(prices, look_back=30, epochs=50)  # ✨ Optimized: 2-3x faster
             pred_svr = svr_forecast(prices)
             pred_xgb = xgboost_forecast(prices)
             
